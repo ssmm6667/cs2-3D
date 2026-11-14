@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS2 3D ARENA</title>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#080d13;color:white;font-family:Arial}
+canvas{display:block}
+#hud{
+ position:fixed;top:15px;left:15px;
+ display:flex;gap:9px;flex-wrap:wrap;z-index:2;
+ pointer-events:none
+}
+.stat{
+ background:#101d2bdf;padding:12px 16px;
+ border:1px solid #52677a;border-radius:7px;
+ font-weight:bold
+}
+#bottom{
+ position:fixed;bottom:22px;left:22px;right:22px;
+ display:flex;justify-content:space-between;
+ align-items:end;pointer-events:none
+}
+#hpbox{width:190px;background:#333;height:15px;border-radius:5px;overflow:hidden}
+#hpbar{height:100%;width:100%;background:#00e98b}
+#ammo{font-size:23px;font-weight:bold;text-shadow:0 2px 5px black}
+#cross{
+ position:fixed;left:50%;top:50%;
+ transform:translate(-50%,-50%);
+ width:18px;height:18px;pointer-events:none
+}
+#cross:before,#cross:after{
+ content:"";position:absolute;background:#00ff9d
+}
+#cross:before{width:2px;height:18px;left:8px}
+#cross:after{height:2px;width:18px;top:8px}
+#message{
+ position:fixed;top:100px;width:100%;
+ text-align:center;color:#00ff99;font-weight:bold;
+ pointer-events:none
+}
+#screen{
+ position:fixed;inset:0;z-index:5;
+ background:#050a12ed;
+ display:flex;align-items:center;justify-content:center;
+ text-align:center
+}
+.panel{
+ width:min(90%,430px);padding:30px;
+ background:#111d2b;border:1px solid #536b82;
+ border-radius:15px
+}
+h1{color:#00ff99;font-size:32px}
+p{line-height:1.8;color:#c2ccd5}
+button{
+ background:#00ed91;color:#06130d;
+ border:0;border-radius:7px;padding:14px 30px;
+ font-size:17px;font-weight:bold;cursor:pointer
+}
+button:hover{background:white}
+#hint{
+ position:fixed;bottom:5px;width:100%;
+ text-align:center;color:#b6c3ce;
+ font-size:11px;pointer-events:none
+}
+</style>
+
+<script type="importmap">
+{
+ "imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+ }
+}
+</script>
+</head>
+
+<body>
+
+<div id="hud">
+ <div class="stat">HP: <span id="hp">100</span></div>
+ <div class="stat">SCORE: <span id="score">0</span></div>
+ <div class="stat">KILLS: <span id="kills">0</span></div>
+ <div class="stat">BOT: <span id="bots">5</span></div>
+</div>
+
+<div id="cross"></div>
+<div id="message"></div>
+
+<div id="bottom">
+ <div>
+  <b>HEALTH</b>
+  <div id="hpbox"><div id="hpbar"></div></div>
+ </div>
+ <div id="ammo">30 / 120</div>
+</div>
+
+<div id="hint">
+ WASD: MOVE | MOUSE: LOOK | CLICK: ACTION |
+ 1: RIFLE | 3: KNIFE | R: RELOAD | SPACE: JUMP
+</div>
+
+<div id="screen">
+ <div class="panel">
+  <h1>CS2 3D ARENA</h1>
+  <p>
+   3D BOT BATTLE<br>
+   5 ta BOTga qarshi o‘yna!<br><br>
+   1 — Avtomat<br>
+   3 — Pichoq<br>
+   WASD — Harakat
+  </p>
+  <button id="start">START GAME</button>
+ </div>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+
+// ======================
+// 1. SCENE
+// ======================
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x8b9ba5);
+scene.fog=new THREE.Fog(0x8b9ba5,35,85);
+
+const camera=new THREE.PerspectiveCamera(
+ 75,innerWidth/innerHeight,0.1,120
+);
+camera.position.set(0,1.7,12);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// ======================
+// 2. LIGHT
+// ======================
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x3a4141,2));
+
+const sun=new THREE.DirectionalLight(0xffffff,2);
+sun.position.set(15,25,10);
+sun.castShadow=true;
+scene.add(sun);
+
+// ======================
+// 3. ARENA
+// ======================
+
+const floor=new THREE.Mesh(
+ new THREE.PlaneGeometry(65,65),
+ new THREE.MeshStandardMaterial({color:0x59615c})
+);
+floor.rotation.x=-Math.PI/2;
+floor.receiveShadow=true;
+scene.add(floor);
+
+const grid=new THREE.GridHelper(65,65,0x42564c,0x6b776d);
+grid.position.y=0.02;
+scene.add(grid);
+
+const obstacles=[];
+function makeBox(x,y,z,sx,sy,sz,color=0x747d7b){
+ const mesh=new THREE.Mesh(
+  new THREE.BoxGeometry(sx,sy,sz),
+  new THREE.MeshStandardMaterial({color,roughness:.9})
+ );
+ mesh.position.set(x,y,z);
+ mesh.castShadow=true;
+ mesh.receiveShadow=true;
+ scene.add(mesh);
+
+ obstacles.push({
+  x1:x-sx/2,x2:x+sx/2,
+  z1:z-sz/2,z2:z+sz/2
+ });
+ return mesh;
+}
+
+// Arena walls
+makeBox(0,2,-32,65,4,1);
+makeBox(0,2,32,65,4,1);
+makeBox(-32,2,0,1,4,65);
+makeBox(32,2,0,1,4,65);
+
+// Buildings
+makeBox(-12,2,-12,9,4,7);
+makeBox(12,2,-12,9,4,7);
+makeBox(-12,1.5,12,7,3,5);
+makeBox(12,1.5,12,7,3,5);
+
+// Cover
+makeBox(0,.8,-5,7,1.6,2,0x9a855e);
+makeBox(-5,.8,3,2,1.6,7,0x9a855e);
+makeBox(6,.8,5,2,1.6,7,0x9a855e);
+makeBox(0,1,20,8,2,2,0x8c7954);
+
+// ======================
+// 4. PLAYER
+// ======================
+
+const player={
+ hp:100,
+ score:0,
+ kills:0,
+ ammo:30,
+ reserve:120,
+ speed:8,
+ velocityY:0,
+ grounded:true,
+ reloading:false
+};
+
+let yaw=0,pitch=0;
+let running=false;
+let lastTime=0;
+let fireDelay=0;
+let damageDelay=0;
+
+const keys={};
+
+function collision(x,z){
+ return obstacles.some(o=>
+  x+.4>o.x1 && x-.4<o.x2 &&
+  z+.4>o.z1 && z-.4<o.z2
+ );
+}
+
+// ======================
+// 5. WEAPONS
+// ======================
+
+const weapon=new THREE.Group();
+const knife=new THREE.Group();
+
+const metal=new THREE.MeshStandardMaterial({
+ color:0x303b45,metalness:.7,roughness:.3
+});
+const silver=new THREE.MeshStandardMaterial({
+ color:0x9aa7af,metalness:.8
+});
+const blue=new THREE.MeshStandardMaterial({
+ color:0x00dfff,
+ emissive:0x0088ff,
+ emissiveIntensity:2,
+ metalness:.8
+});
+const grip=new THREE.MeshStandardMaterial({
+ color:0x222a32
+});
+
+function addPart(group,x,y,z,sx,sy,sz,mat){
+ const m=new THREE.Mesh(
+  new THREE.BoxGeometry(sx,sy,sz),mat
+ );
+ m.position.set(x,y,z);
+ group.add(m);
+ return m;
+}
+
+// Rifle model
+addPart(weapon,0,0,0,.22,.22,.55,metal);
+addPart(weapon,0,.06,-.35,.08,.08,.55,silver);
+addPart(weapon,0,-.2,.06,.14,.3,.16,grip);
+addPart(weapon,.1,0,.1,.08,.08,.2,silver);
+weapon.position.set(.38,-.32,-.65);
+
+// Knife handle
+addPart(knife,0,-.15,0,.12,.36,.13,grip);
+addPart(knife,0,.08,-.15,.08,.15,.1,silver);
+
+// Knife blade
+const blade=new THREE.Mesh(
+ new THREE.ConeGeometry(.095,.85,4),
+ blue
+);
+blade.rotation.x=Math.PI/2;
+blade.position.set(0,.28,-.57);
+knife.add(blade);
+
+knife.position.set(.4,-.32,-.48);
+knife.rotation.x=-.2;
+
+camera.add(weapon);
+camera.add(knife);
+scene.add(camera);
+
+let currentWeapon="rifle";
+
+function switchWeapon(type){
+ currentWeapon=type;
+ weapon.visible=type==="rifle";
+ knife.visible=type==="knife";
+ showMessage(type==="rifle"?"RIFLE":"KNIFE");
+}
+
+knife.visible=false;
+
+// ======================
+// 6. BOT SYSTEM
+// ======================
+
+let bots=[];
+let botShots=[];
+
+function createBot(x,z){
+ const group=new THREE.Group();
+
+ const body=new THREE.Mesh(
+  new THREE.BoxGeometry(.65,.9,.4),
+  new THREE.MeshStandardMaterial({color:0xa64c40})
+ );
+ body.position.y=1.05;
+ body.castShadow=true;
+ group.add(body);
+
+ const head=new THREE.Mesh(
+  new THREE.SphereGeometry(.23,16,16),
+  new THREE.MeshStandardMaterial({color:0xc18d71})
+ );
+ head.position.y=1.7;
+ group.add(head);
+
+ const helmet=new THREE.Mesh(
+  new THREE.SphereGeometry(.25,16,10,0,Math.PI*2,0,Math.PI/2),
+  metal
+ );
+ helmet.position.y=1.78;
+ group.add(helmet);
+
+ for(const side of [-1,1]){
+  addPart(group,side*.18,.35,0,.2,.65,.22,metal);
+  addPart(group,side*.43,1.1,0,.18,.65,.2,metal);
+ }
+
+ const bot={
+  group,
+  hp:100,
+  alive:true,
+  cooldown:2,
+  speed:1.5
+ };
+
+ group.traverse(obj=>{
+  if(obj.isMesh)obj.userData.bot=bot;
+ });
+
+ group.position.set(x,0,z);
+ scene.add(group);
+ bots.push(bot);
+}
+
+function spawnBots(){
+ [
+  [-23,-20],
+  [23,-20],
+  [-24,22],
+  [24,22],
+  [0,-26]
+ ].forEach(p=>createBot(p[0],p[1]));
+}
+
+// ======================
+// 7. BOT PROJECTILES
+// ======================
+
+function botShoot(bot){
+ const origin=bot.group.position.clone();
+ origin.y=1.3;
+
+ const direction=camera.position.clone()
+  .sub(origin).normalize();
+
+ const ball=new THREE.Mesh(
+  new THREE.SphereGeometry(.13,10,10),
+  new THREE.MeshBasicMaterial({color:0xff5533})
+ );
+ ball.position.copy(origin);
+ scene.add(ball);
+
+ botShots.push({
+  mesh:ball,
+  velocity:direction.multiplyScalar(15),
+  life:3
+ });
+}
+
+// ======================
+// 8. SHOOT AND KNIFE
+// ======================
+
+const raycaster=new THREE.Raycaster();
+const center=new THREE.Vector2(0,0);
+
+function attack(){
+ if(!running)return;
+
+ if(currentWeapon==="rifle"){
+  if(player.reloading || fireDelay>0)return;
+
+  if(player.ammo<=0){
+   showMessage("PRESS R TO RELOAD");
+   return;
+  }
+
+  player.ammo--;
+  fireDelay=.22;
+
+  weapon.position.z=-.52;
+  setTimeout(()=>weapon.position.z=-.65,70);
+
+  raycaster.setFromCamera(center,camera);
+
+  let objects=[];
+  bots.forEach(bot=>{
+   if(bot.alive){
+    bot.group.traverse(obj=>{
+     if(obj.isMesh)objects.push(obj);
+    });
+   }
+  });
+
+  const hits=raycaster.intersectObjects(objects);
+
+  if(hits.length && hits[0].distance<55){
+   const bot=hits[0].object.userData.bot;
+
+   if(bot && bot.alive){
+    bot.hp-=34;
+    if(bot.hp<=0)eliminateBot(bot);
+   }
+  }
+
+ }else{
+  // Arcade knife attack
+  if(fireDelay>0)return;
+  fireDelay=.55;
+
+  knife.rotation.x=-.8;
+  setTimeout(()=>knife.rotation.x=-.2,160);
+
+  let target=null;
+  let best=3.5;
+
+  bots.forEach(bot=>{
+   if(!bot.alive)return;
+
+   const point=bot.group.position.clone();
+   point.y+=1;
+
+   const distance=point.distanceTo(camera.position);
+   const direction=point.clone()
+    .sub(camera.position).normalize();
+
+   const facing=new THREE.Vector3();
+   camera.getWorldDirection(facing);
+
+   const dot=facing.dot(direction);
+
+   if(distance<best && dot>.75){
+    best=distance;
+    target=bot;
+   }
+  });
+
+  if(target){
+   target.hp-=100;
+   if(target.hp<=0)eliminateBot(target);
+   showMessage("KNIFE HIT!");
+  }else{
+   showMessage("TOO FAR!");
+  }
+ }
+
+ updateHUD();
+}
+
+function eliminateBot(bot){
+ bot.alive=false;
+ scene.remove(bot.group);
+ player.score+=100;
+ player.kills++;
+ showMessage("BOT ELIMINATED +100");
+
+ if(bots.every(b=>!b.alive)){
+  showMessage("ALL BOTS DEFEATED!");
+ }
+}
+
+// ======================
+// 9. RELOAD
+// ======================
+
+function reload(){
+ if(!running || currentWeapon!=="rifle")return;
+
+
+ player.reloading=true;
+ showMessage("RELOADING...");
+
+ setTimeout(()=>{
+  if(!running)return;
+
+  const amount=Math.min(30-player.ammo,player.reserve);
+  player.ammo+=amount;
+  player.reserve-=amount;
+  player.reloading=false;
+  updateHUD();
+ },1300);
+}
+
+// ======================
+// 10. INPUT
+// ======================
+
+addEventListener("keydown",e=>{
+ keys[e.code]=true;
+
+ if(e.code==="Digit1")switchWeapon("rifle");
+ if(e.code==="Digit3")switchWeapon("knife");
+ if(e.code==="KeyR")reload();
+
+ if(e.code==="Space" && player.grounded && running){
+  player.velocityY=7;
+  player.grounded=false;
+ }
+});
+
+addEventListener("keyup",e=>{
+ keys[e.code]=false;
+});
+
+document.addEventListener("mousemove",e=>{
+ if(!document.pointerLockElement)return;
+
+ yaw-=e.movementX*.002;
+ pitch-=e.movementY*.002;
+ pitch=THREE.MathUtils.clamp(pitch,-1.4,1.4);
+
+ camera.rotation.order="YXZ";
+ camera.rotation.set(pitch,yaw,0);
+});
+
+document.addEventListener("mousedown",e=>{
+ if(e.button===0 && running && document.pointerLockElement){
+  attack();
+ }
+});
+
+// ======================
+// 11. PLAYER MOVEMENT
+// ======================
+
+function movePlayer(dt){
+ const forward=new THREE.Vector3(
+  -Math.sin(yaw),0,-Math.cos(yaw)
+ );
+ const right=new THREE.Vector3(
+  Math.cos(yaw),0,-Math.sin(yaw)
+ );
+
+ const move=new THREE.Vector3();
+
+ if(keys.KeyW)move.add(forward);
+ if(keys.KeyS)move.sub(forward);
+ if(keys.KeyD)move.add(right);
+ if(keys.KeyA)move.sub(right);
+
+ if(move.length()>0){
+  move.normalize().multiplyScalar(player.speed*dt);
+
+  const nx=camera.position.x+move.x;
+  const nz=camera.position.z+move.z;
+
+  if(!collision(nx,camera.position.z))camera.position.x=nx;
+  if(!collision(camera.position.x,nz))camera.position.z=nz;
+ }
+
+ player.velocityY-=18*dt;
+ camera.position.y+=player.velocityY*dt;
+
+ if(camera.position.y<=1.7){
+  camera.position.y=1.7;
+  player.velocityY=0;
+  player.grounded=true;
+ }
+ camera.position.x=THREE.MathUtils.clamp(camera.position.x,-30,30);
+ camera.position.z=THREE.MathUtils.clamp(camera.position.z,-30,30);
+}
+
+// ======================
+// 12. BOT AI
+// ======================
+
+function updateBots(dt){
+ bots.forEach(bot=>{
+  if(!bot.alive)return;
+
+  const pos=bot.group.position;
+  const dx=camera.position.x-pos.x;
+  const dz=camera.position.z-pos.z;
+  const dist=Math.hypot(dx,dz);
+
+  bot.group.rotation.y=Math.atan2(dx,dz);
+
+  if(dist>7){
+   const nx=pos.x+dx/dist*bot.speed*dt;
+   const nz=pos.z+dz/dist*bot.speed*dt;
+
+   if(!collision(nx,pos.z))pos.x=nx;
+   if(!collision(pos.x,nz))pos.z=nz;
+  }
+
+  bot.cooldown-=dt;
+
+  if(dist<24 && bot.cooldown<=0){
+   botShoot(bot);
+   bot.cooldown=2.2;
+  }
+ });
+}
+
+// ======================
+// 13. UPDATE PROJECTILES
+// ======================
+
+function updateShots(dt){
+ botShots.forEach(p=>{
+  p.mesh.position.addScaledVector(p.velocity,dt);
+  p.life-=dt;
+
+  if(p.mesh.position.distanceTo(camera.position)<.65 &&
+  damageDelay<=0){
+   player.hp-=8;
+   damageDelay=.5;
+   p.life=0;
+   scene.remove(p.mesh);
+   updateHUD();
+  }
+
+  if(p.life<=0)scene.remove(p.mesh);
+ });
+
+ botShots=botShots.filter(p=>p.life>0);
+}
+
+// ======================
+// 14. HUD
+// ======================
+
+function updateHUD(){
+ document.getElementById("hp").textContent=
+ Math.max(0,Math.ceil(player.hp));
+
+ document.getElementById("score").textContent=player.score;
+ document.getElementById("kills").textContent=player.kills;
+
+ document.getElementById("bots").textContent=
+ bots.filter(b=>b.alive).length;
+
+ document.getElementById("ammo").textContent=
+ currentWeapon==="knife"?"KNIFE":
+ player.ammo+" / "+player.reserve;
+
+ document.getElementById("hpbar").style.width=
+ Math.max(0,player.hp)+"%";
+}
+
+let messageTimer;
+
+function showMessage(text){
+ const el=document.getElementById("message");
+ el.textContent=text;
+ clearTimeout(messageTimer);
+ messageTimer=setTimeout(()=>el.textContent="",1300);
+}
+
+// ======================
+// 15. GAME OVER
+// ======================
+
+function gameOver(){
+ running=false;
+ document.exitPointerLock?.();
+
+ document.getElementById("screen").style.display="flex";
+
+ document.querySelector(".panel").innerHTML=
+
+ document.getElementById("restart").onclick=startGame;
+}
+
+// ======================
+// 16. START GAME
+// ======================
+
+function startGame(){
+ player.hp=100;
+ player.score=0;
+ player.kills=0;
+ player.ammo=30;
+ player.reserve=120;
+ player.velocityY=0;
+ player.grounded=true;
+ player.reloading=false;
+
+ bots.forEach(b=>scene.remove(b.group));
+ botShots.forEach(p=>scene.remove(p.mesh));
+
+ bots=[];
+ botShots=[];
+
+ camera.position.set(0,1.7,12);
+ camera.rotation.set(0,0,0);
+ yaw=0;
+ pitch=0;
+
+ fireDelay=0;
+ damageDelay=0;
+
+ switchWeapon("rifle");
+ spawnBots();
+ updateHUD();
+
+ running=true;
+ lastTime=performance.now();
+
+ document.getElementById("screen").style.display="none";
+ renderer.domElement.requestPointerLock();
+}
+
+document.getElementById("start").onclick=startGame;
+
+// ======================
+// 17. MAIN LOOP
+// ======================
+
+function animate(time){
+ requestAnimationFrame(animate);
+
+ const dt=Math.min((time-lastTime)/1000,.04);
+ lastTime=time;
+
+ if(running){
+  fireDelay=Math.max(0,fireDelay-dt);
+  damageDelay=Math.max(0,damageDelay-dt);
+
+  movePlayer(dt);
+  updateBots(dt);
+  updateShots(dt);
+  updateHUD();
+
+  if(player.hp<=0)gameOver();
+ }
+
+ renderer.render(scene,camera);
+}
+
+requestAnimationFrame(animate);
+
+// RESIZE
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+
+</body>
+</html>
